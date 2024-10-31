@@ -14,7 +14,9 @@ setup:
   router:
     prefix: /avatar/parameters/haptX-
   behavior:
-    type: ProximityBased
+    type: VelocityBased
+    timeout: 0.25
+    stall_time: 0.5
   controllers:
     - name: headset
       protocol:

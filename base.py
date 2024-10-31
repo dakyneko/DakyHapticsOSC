@@ -13,9 +13,14 @@ from types import SimpleNamespace as N
 from serial import Serial
 from serial.tools.list_ports import comports as serial_ports
 from random import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Awaitable
 D = dict
+
+
+# TODO: replace with proper class
+def log(*args, **kwargs):
+    print(*args, **kwargs)
 
 
 class Game:
@@ -200,16 +205,19 @@ class Actuator:
     min: float = 0.0
     max: float = 1.0
     min_sensitivity: float = 0.0
-    collider_scaler: float = 5 # heuristic
-    throttle: Any = None # depends on behavior
+    # handlded by behaviors
+    collider_scaler: float = 5 # velocity only
+    throttle: Any = None
 
     def map(self, value: float) -> float:
-        return remap_clamp(value, 0, 1, self.min, self.max)
+        if value < self.min_sensitivity:
+            return 0.
+        return remap_clamp(value, self.min_sensitivity, 1, self.min, self.max)
 
 
 @dataclass
 class Controller:
-    name: str
+    name: str # must be unique
     address_to_actuator: dict[Any, Actuator]
     protocol: Protocol
     connection: Connection
@@ -294,17 +302,81 @@ class ProximityBased(Behavior):
 
 
 @dataclass
+class VelocityState:
+    next_time: float = 0
+    last_distance: float = 0
+    last_time: float = 0
+    samples: list[float] = field(default_factory=list)
+    timeout_task: asyncio.Task = None
+
+@dataclass
 class VelocityBased(Behavior):
     timeout: float = 0.25 # turn off after no update
     stall_time: float = 0.5 # max sample time
 
     def __post_init__(self):
-        #self.state = N() # (Controller, address) -> State
-        pass
+        self.states = defaultdict(VelocityState) # (Controller, address) -> VelocityState
 
-    async def on_update(self, Controller: Controller, address: Any, distance: float) -> None:
+    def get_state(self, controller: Controller, address: Any) -> VelocityState:
+        return self.states[(controller.name, address)]
+
+    async def on_update(self, controller: Controller, address: Any, distance: float) -> None:
+        state = self.get_state(controller, address)
         actuator = controller.resolve(address)
         # TODO: can get actuator extra attributes
+
+        now = time()
+        dt = now - state.last_time
+
+        if dt > self.stall_time:
+            state.samples = []
+            log(f"{controller.name}/{actuator.name} samples stall")
+        else:
+            ddist = abs(state.last_distance - distance)
+            v = clamp(ddist / dt / actuator.collider_scaler, 0, 1) # normalized 0-1
+            state.samples.append(v)
+
+        state.last_time = now
+        state.last_distance = distance
+
+        await self.handle_samples(now, state, controller, address, actuator)
+
+    # TODO: consider doing a continuous/smooth moving average
+    async def handle_samples(self, now: float, state: VelocityState, controller: Controller, address: Any, actuator: Actuator):
+        if len(state.samples) == 0:
+            return # nothing to do
+
+        if now < state.next_time:
+            log(f'{controller.name}/{actuator.name} throttled ({len(state.samples)} samples)') # debug
+            return # throttled
+
+        v_avg = sum(state.samples) / len(state.samples)
+        await controller.actuate(address, v_avg)
+        # will actuate for a bit until timeout
+        if state.timeout_task:
+            state.timeout_task.cancel() # reschedule
+        state.timeout_task = asyncio.create_task(self.run_timeout(controller, address, actuator))
+
+        if (throttle := actuator.throttle):
+            if (w := throttle.get('constant')):
+                state.next_time = now + w
+                log(f'{controller.name}/{actuator.name} -> {v_avg*100=:3.2f}% ({len(state.samples)} samples, constant={w:.1f})') # debug
+            elif (w := throttle.get('random')):
+                # inverse proportional to intensity
+                rand_wait = random() * remap_clamp(v_avg, 1, 0, 0, w)
+                log(f'{controller.name}/{actuator.name} -> {v_avg*100=:3.2f}% ({len(state.samples)} samples, rand_wait={rand_wait:.1f})') # debug
+                state.next_time = now + rand_wait
+
+                # TODO: schedule task for next_time to actuate based on samples
+                # if timeout runs before next_time then it's fine otherwise timeout need reschedule
+
+        state.samples = [] # flush data
+
+    async def run_timeout(self, controller: Controller, address: Any, actuator: Actuator):
+        await asyncio.sleep(self.timeout)
+        log(f'{controller.name}/{actuator.name} run_timeout') # debug
+        await controller.actuate(address, 0)
+        # TODO: should register the stop?
 
 
 @dataclass

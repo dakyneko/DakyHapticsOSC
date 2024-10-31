@@ -2,9 +2,14 @@
 
 import asyncio, sys, traceback
 from config import load_config
+from argparse import ArgumentParser
+
+parser = ArgumentParser()
+parser.add_argument('config', type=str)
+args = parser.parse_args()
 
 async def main():
-    manager = load_config('VRChat', 'config_sample.yaml')
+    manager = load_config('VRChat', args.config)
 
     router = manager.router
     print("controllers:", list(router.name_to_controller.keys()))

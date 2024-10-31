@@ -11,3 +11,12 @@ Features:
 This is work in progress.
 The associated firmware to upload on hardware microcontrollers like ESP32 should arrive soon.
 In mean time you can use the prototype from gist here: https://gist.github.com/dakyneko/229e7701e375058a6401de5267c3cd08#file-esp32_haptics_example-cpp (ignore the Python code below, it's the predecessor of this repository)
+
+# Install & Run
+
+- git clone
+- ensure python ≥3.10
+- pip install python-osc pyserial pyserial-asyncio
+- cp config_sample.yaml config.yaml
+- edit config.yaml
+- python run.py config.yaml

@@ -288,40 +288,67 @@ class Router():
 
 
 @dataclass
+class BehaviorState:
+    timeout_at: float = 0 # absolute timestamp
+    timeout_task: asyncio.Task = None
+
+@dataclass
 class Behavior:
+    timeout: float = 0.25 # turn off after no update
+    # must be defined by subclasses
+    #states: (Controller, address) -> BehaviorState
+
     async def start(self) -> None: pass
     async def stop(self) -> None: pass
     async def on_update(self, Controller: Controller, address: Any, distance: float) -> None: pass
 
+    def get_state(self, controller: Controller, address: Any) -> BehaviorState:
+        return self.states[(controller.name, address)]
+
+    async def on_timeout(self, state: BehaviorState, controller: Controller, address: Any, actuator: Actuator):
+        await controller.actuate(address, 0) # TODO: should register the stop?
+        state.timeout_task = None
+        state.timeout_at = None
+
+    async def ensure_timeout(self, now: float, state: BehaviorState, controller: Controller, address: Any, actuator: Actuator):
+        loop = asyncio.get_event_loop()
+        if state.timeout_task:
+            state.timeout_task.cancel() # reschedule
+        f = self.on_timeout(state, controller, address, actuator)
+        state.timeout_task = loop.create_task(delayed_async(self.timeout, f))
+        state.timeout_at = now + self.timeout
+
 
 @dataclass
 class ProximityBased(Behavior):
+    def __post_init__(self):
+        self.states = defaultdict(BehaviorState)
+
     async def on_update(self, controller: Controller, address: Any, distance: float) -> None:
         print(f"ProximityBased.on_update {controller.name}#{address} -> {distance=}")
+        now = time()
+        state = self.get_state(controller, address)
+        actuator = controller.resolve(address)
+
         await controller.actuate(address, distance)
-        # TODO: handle timeout, throttle?
+        await self.ensure_timeout(now, state, controller, address, actuator)
+        # TODO: handle throttle?
 
 
 @dataclass
-class VelocityState:
+class VelocityState(BehaviorState):
     next_at: float = 0 # absolute timestamp
-    timeout_at: float = 0 # absolute timestamp
     last_distance: float = 0
     last_time: float = 0
     samples: list[float] = field(default_factory=list)
     throttled_task: asyncio.Task = None
-    timeout_task: asyncio.Task = None
 
 @dataclass
 class VelocityBased(Behavior):
-    timeout: float = 0.25 # turn off after no update
     stall_time: float = 0.5 # max sample time
 
     def __post_init__(self):
-        self.states = defaultdict(VelocityState) # (Controller, address) -> VelocityState
-
-    def get_state(self, controller: Controller, address: Any) -> VelocityState:
-        return self.states[(controller.name, address)]
+        self.states = defaultdict(VelocityState)
 
     async def on_update(self, controller: Controller, address: Any, distance: float) -> None:
         state = self.get_state(controller, address)
@@ -362,11 +389,7 @@ class VelocityBased(Behavior):
         state.samples = [] # flush data
 
         # will actuate for a bit until timeout
-        if state.timeout_task:
-            state.timeout_task.cancel() # reschedule
-        f = self.on_timeout(state, controller, address, actuator)
-        state.timeout_task = loop.create_task(delayed_async(self.timeout, f))
-        state.timeout_at = now + self.timeout
+        await self.ensure_timeout(now, state, controller, address, actuator)
 
         throttle_time: float = None
         if (throttle := actuator.throttle):
@@ -390,11 +413,6 @@ class VelocityBased(Behavior):
         state.throttled_task = None
         state.next_at = None
         await self.handle_samples(now, state, controller, address, actuator)
-
-    async def on_timeout(self, state: VelocityState, controller: Controller, address: Any, actuator: Actuator):
-        await controller.actuate(address, 0) # TODO: should register the stop?
-        state.timeout_task = None
-        state.timeout_at = None
 
 
 @dataclass

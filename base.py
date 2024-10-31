@@ -331,7 +331,8 @@ class ProximityBased(Behavior):
         state = self.get_state(controller, address)
         actuator = controller.resolve(address)
 
-        await controller.actuate(address, distance)
+        intensity = 1 - distance # yeah like proximity
+        await controller.actuate(address, intensity)
         await self.ensure_timeout(now, state, controller, address, actuator)
         # TODO: handle throttle?
 

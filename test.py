@@ -32,7 +32,8 @@ loop.set_debug(True) # TODO
 def signal_handler():
     for task in asyncio.all_tasks():
         task.cancel()
-loop.add_signal_handler(SIGINT, signal_handler)
+# TODO: not implemented on windows
+#loop.add_signal_handler(SIGINT, signal_handler)
 try:
    loop.run_until_complete(main())
 finally:

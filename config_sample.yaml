@@ -1,0 +1,29 @@
+games:
+  VRChat:
+    hostname: 127.0.0.1
+    sending_port: 9000
+    receiving_port: 9001
+
+cfg_head: &cfg_head
+  min_sensitivity: 0.04
+  collider_scaler: 5
+  throttle:
+    random: 1.5
+
+setup:
+  router:
+    prefix: /avatar/parameters/haptX-
+  behavior:
+    type: ProximityBased
+  controllers:
+    - name: headset
+      protocol:
+        type: DakyProtocol
+      connection:
+        type: UDP
+        address: localhost
+        port: 1337
+      actuators:
+        0: { name: headCheekR, min: 0.0275, max: 0.0392, <<: *cfg_head }
+        1: { name: headCheekL, min: 0.0275, max: 0.0392, <<: *cfg_head }
+        2: { name: headTop,    min: 0.0325, max: 0.0588, <<: *cfg_head }

@@ -20,9 +20,8 @@ async def main():
 
 
 def handle_exception(loop, context):
-   exception = context.get("exception", None)
-   if exception:
-       print(''.join(traceback.format_exception(type(exception), exception, exception.__traceback__)), file=sys.stderr)
+   if (exc := context.get("exception")):
+       print(''.join(traceback.format_exception(type(exc), exc, exc.__traceback__)), file=sys.stderr)
    else:
        message = context.get("message", "Unknown error")
        print(f"Exception with message: {message}", file=sys.stderr)

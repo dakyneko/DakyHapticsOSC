@@ -55,7 +55,7 @@ class VRChat(Game):
     def listen(self, path: str, callback: Awaitable, wildcard_prefix=False):
         if wildcard_prefix: path += '*' # wildcard listen
         # workaround because asyncio DatagramProtocol doesn't support Awaitable callback
-        def f(path: str, value: float):
+        def f(path: str, value: Any):
             self.event_loop.create_task(callback(path, value))
         self.dispatcher.map(path, f)
 
@@ -68,7 +68,7 @@ class VRChat(Game):
         self.client.send_message(path, value)
 
 
-class ChilloutVR(Game): pass
+#class ChilloutVR(Game): pass
 
 
 @dataclass
@@ -118,10 +118,10 @@ class UDP(Connection):
 
         class Receiver(asyncio.DatagramProtocol):
             def datagram_received(self, data, addr):
-                print(f"UDP.datagram_received {data=} {addr=}") # TODO
+                log(f"UDP.datagram_received {data=} {addr=}") # TODO
                 loop.create_task(on_receive(data))
             def error_received(self, exc):
-                print(f"UDP.error_received {exc=}") # TODO
+                log(f"UDP.error_received {exc=}") # TODO
                 loop.create_task(on_error(exc))
         self.transport, self.receiver = await loop.create_datagram_endpoint(
                 Receiver,
@@ -131,7 +131,7 @@ class UDP(Connection):
     async def is_connected(self) -> bool:
         return not self.transport.is_closing() # TODO: can't know, UDP is stateless
     async def send(self, data: bytes) -> None:
-        print(f"UDP.send {data=}") # TODO
+        log(f"UDP.send {data=}") # TODO
         self.transport.sendto(data)
 
 
@@ -246,7 +246,7 @@ class Controller:
     def info(self) -> dict: pass # TODO
 
     async def actuate(self, address: Any, value: float):
-        print(f"Controller.actuate {address=} {value=}")
+        log(f"Controller.actuate {address=} {value=}")
 
         actuator = self.address_to_actuator.get(address)
         if actuator == None:
@@ -306,6 +306,7 @@ class Behavior:
         return self.states[(controller.name, address)]
 
     async def on_timeout(self, state: BehaviorState, controller: Controller, address: Any, actuator: Actuator):
+        log(f'{controller.name}/{actuator.name} on_timeout') # debug
         await controller.actuate(address, 0) # TODO: should register the stop?
         state.timeout_task = None
         state.timeout_at = None
@@ -325,7 +326,7 @@ class ProximityBased(Behavior):
         self.states = defaultdict(BehaviorState)
 
     async def on_update(self, controller: Controller, address: Any, distance: float) -> None:
-        print(f"ProximityBased.on_update {controller.name}#{address} -> {distance=}")
+        log(f"ProximityBased.on_update {controller.name}#{address} -> {distance=}")
         now = time()
         state = self.get_state(controller, address)
         actuator = controller.resolve(address)
@@ -386,6 +387,7 @@ class VelocityBased(Behavior):
 
         v_avg = sum(state.samples) / len(state.samples)
         await controller.actuate(address, v_avg)
+        log(f'{controller.name}/{actuator.name} -> actuate {v_avg*100=:3.2f}% samples={len(state.samples)} ') # debug
         state.samples = [] # flush data
 
         # will actuate for a bit until timeout
@@ -407,8 +409,10 @@ class VelocityBased(Behavior):
                 f = self.on_throttle_over(state, controller, address, actuator)
                 state.throttled_task = loop.create_task(delayed_async(throttle_time, f))
                 state.next_at = now + throttle_time
+                log(f"{controller.name}/{actuator.name} schedule throttle {throttle_time=:.1f}") # TODO: debug
 
     async def on_throttle_over(self, state: VelocityState, controller: Controller, address: Any, actuator: Actuator):
+        log(f'{controller.name}/{actuator.name} on_throttle_over ({len(state.samples)} samples)') # debug
         now = time()
         state.throttled_task = None
         state.next_at = None
@@ -431,9 +435,9 @@ class Manager:
 
         for c in self.controllers:
             async def on_receive(data):
-                print(f"on_receive: {data=}", c.protocol.parse_incoming(data))
+                log(f"on_receive: {data=}", c.protocol.parse_incoming(data))
             async def on_error(data):
-                print(f"on_error: {data=}") # TODO:
+                log(f"on_error: {data=}") # TODO:
             await c.connection.connect(loop, on_receive, on_error)
 
         await self.behavior.start()
@@ -452,8 +456,10 @@ class Manager:
     async def on_update(self, path: str, *args) -> None:
         x = self.router.resolve_path(path)
         if x == None:
-            print(f"Warning: received unregistered {path=}")
+            log(f"Warning: received unregistered {path=} {args}")
             return # ignore
+        else:
+            log(f"Manager.on_update {path=} {args=}")
 
         controller, address = x
         await self.behavior.on_update(controller, address, *args)

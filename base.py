@@ -258,7 +258,7 @@ class Router():
 
     def add_controller(self, controller: Controller) -> None:
         for a in controller.actuators():
-            if (c := self.name_to_controller.get(a.name)):
+            if (c := self.name_to_controller.get(a.name)) and c != controller:
                 raise Exception(f"Conflict {a.name} already registered by {c.name}")
             self.name_to_controller[a.name] = controller
 

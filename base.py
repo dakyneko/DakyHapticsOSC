@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 from utils import *
 import socket, logging as log, asyncio, serial_asyncio
 from struct import unpack, pack
@@ -12,7 +13,7 @@ from types import SimpleNamespace as N
 from serial import Serial
 from serial.tools.list_ports import comports as serial_ports
 from random import random
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Awaitable
 D = dict
 
@@ -198,6 +199,9 @@ class Actuator:
     name: str
     min: float = 0.0
     max: float = 1.0
+    min_sensitivity: float = 0.0
+    collider_scaler: float = 5 # heuristic
+    throttle: Any = None # depends on behavior
 
     def map(self, value: float) -> float:
         return remap_clamp(value, 0, 1, self.min, self.max)
@@ -209,10 +213,13 @@ class Controller:
     address_to_actuator: dict[Any, Actuator]
     protocol: Protocol
     connection: Connection
+    # TODO: not handled yet
     on_battery: bool = False
+    inverted_values: bool = False
+    max_concurrent: int = None
 
     def __post_init__(self):
-        self.name_to_address: dict[str, Any] = D()
+        self.name_to_address: dict[str, Any] = {}
         for address, actuator in self.address_to_actuator.items():
             self.add_actuator(address, actuator)
 
@@ -232,9 +239,11 @@ class Controller:
 
     async def actuate(self, address: Any, value: float):
         print(f"Controller.actuate {address=} {value=}")
+
         actuator = self.address_to_actuator.get(address)
         if actuator == None:
             raise Exception(f"Actuator {address=} not found")
+
         value = actuator.map(value)
         data = self.protocol.actuation(address, value)
         await self.connection.send(data)
@@ -245,16 +254,23 @@ class Router():
     prefix: str
 
     def __post_init__(self):
-        self.name_to_controler = D()
+        self.name_to_controller = {}
 
     def add_controller(self, controller: Controller) -> None:
         for a in controller.actuators():
-            if (c := self.name_to_controler.get(a.name )):
+            if (c := self.name_to_controller.get(a.name)):
                 raise Exception(f"Conflict {a.name} already registered by {c.name}")
-            self.name_to_controler[a.name] = controller
+            self.name_to_controller[a.name] = controller
 
     def controllers(self) -> list[Controller]:
-        return list(self.name_to_controler.values())
+        return list(self.name_to_controller.values())
+
+    def resolve_name(self, name: str) -> (Controller, Any):
+        controller = self.name_to_controller.get(name)
+        if controller == None:
+            return None
+        address = controller.actuator_address(name)
+        return (controller, address)
 
     def resolve_path(self, path: str) -> (Controller, Any):
         if not path.startswith(self.prefix):
@@ -262,62 +278,33 @@ class Router():
         name = path[len(self.prefix):] # remove prefix
         return self.resolve_name(name)
 
-    def resolve_name(self, name: str) -> (Controller, Any):
-        controller = self.name_to_controler.get(name)
-        if controller == None:
-            return None
-        address = controller.actuator_address(name)
-        return (controller, address)
-
 
 @dataclass
 class Behavior:
-    router: Router
-    min_sensitivity: float = 0.0
-    collider_scaler: float = 5
-
     async def start(self) -> None: pass
     async def stop(self) -> None: pass
-    async def on_update(self, name: str, distance: float) -> None: pass
+    async def on_update(self, Controller: Controller, address: Any, distance: float) -> None: pass
 
 
 @dataclass
 class ProximityBased(Behavior):
-    async def on_update(self, path: str, distance: float) -> None:
-        print(f"ProximityBased.on_update {path=} -> {distance=}")
-        x = self.router.resolve_path(path)
-        if x == None:
-            print(f"Warning: received unregistered {path=}")
-            return # ignore
-        controller, address = x
+    async def on_update(self, controller: Controller, address: Any, distance: float) -> None:
+        print(f"ProximityBased.on_update {controller.name}#{address} -> {distance=}")
         await controller.actuate(address, distance)
 
 
 @dataclass
 class VelocityBased(Behavior):
-    loop_time: float = 0.1
-    stall_time: float = 0.5
+    timeout: float = 0.25 # turn off after no update
+    stall_time: float = 0.5 # max sample time
 
     def __post_init__(self):
-        self.run = False
-        # self.state = D()
+        #self.state = N() # (Controller, address) -> State
+        pass
 
-    async def start(self) -> None:
-        asyncio.create_task(self.periodic_task)
-        self.run = True
-
-    async def periodic_task(self) -> None:
-        while self.run:
-            self.loop()
-            await asyncio.sleep(self.loop_time)
-
-    async def loop(self) -> None:
-        print("VelocityBased loop: pretend work") # TODO
-
-    async def stop(self) -> None:
-        self.run = False
-
-    async def on_update(self, name: str, distance: float) -> None: pass
+    async def on_update(self, Controller: Controller, address: Any, distance: float) -> None:
+        actuator = controller.resolve(address)
+        # TODO: can get actuator extra attributes
 
 
 @dataclass
@@ -344,12 +331,21 @@ class Manager:
         await self.behavior.start()
         await self.game.start()
         self.game.listen_distance(path=self.router.prefix,
-                                  callback=self.behavior.on_update,
+                                  callback=self.on_update,
                                   wildcard_prefix=True)
         self.run = True
 
         while self.run:
             await asyncio.sleep(5) # let everything run
+
+    async def on_update(self, path: str, *args) -> None:
+        x = self.router.resolve_path(path)
+        if x == None:
+            print(f"Warning: received unregistered {path=}")
+            return # ignore
+
+        controller, address = x
+        await self.behavior.on_update(controller, address, *args)
 
     async def stop(self) -> None:
         self.run = False

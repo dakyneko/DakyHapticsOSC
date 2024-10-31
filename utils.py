@@ -12,3 +12,6 @@ def remap_clamp(v, in1, in2, out1, out2):
 
 def clamp(v, min_, max_):
     return max(min_, min(max_, v))
+
+def remove_keys(d, *keys):
+    return { k:v for k,v in d.items() if k not in keys }

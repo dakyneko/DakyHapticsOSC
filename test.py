@@ -5,7 +5,7 @@ from base import *
 async def main():
     vrc = VRChat()
     router = Router(prefix='/avatar/parameters/haptX-')
-    behavior = ProximityBased(router)
+    behavior = ProximityBased()
 
     manager = Manager(vrc, router, behavior, [
         Controller('headset',
@@ -17,11 +17,11 @@ async def main():
                    on_battery=False),
         ])
 
-    print("controllers:", list(router.name_to_controler.keys()))
+    print("controllers:", list(router.name_to_controller.keys()))
 
     async def go():
         await asyncio.sleep(1)
-        await behavior.on_update(router.prefix + 'headCheekR', 0.5) # TODO: test
+        await manager.on_update(router.prefix + 'headCheekR', 0.5) # TODO: test
     asyncio.create_task(go())
 
     await manager.start()

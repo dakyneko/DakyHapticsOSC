@@ -2,6 +2,7 @@
 
 import asyncio, sys, traceback
 from config import load_config
+from signal import SIGINT
 
 async def main():
     manager = load_config('VRChat', 'config_sample.yaml')
@@ -27,8 +28,13 @@ def handle_exception(loop, context):
        print(f"Exception with message: {message}", file=sys.stderr)
 
 loop = asyncio.new_event_loop()
+loop.set_exception_handler(handle_exception)
+loop.set_debug(True) # TODO
+def signal_handler():
+    for task in asyncio.all_tasks():
+        task.cancel()
+loop.add_signal_handler(SIGINT, signal_handler)
 try:
-   loop.set_exception_handler(handle_exception)
    loop.run_until_complete(main())
 finally:
    loop.close()

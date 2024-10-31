@@ -425,8 +425,11 @@ class Manager:
                                   wildcard_prefix=True)
         self.run = True
 
-        while self.run:
-            await asyncio.sleep(5) # let everything run
+        try:
+            while self.run:
+                await asyncio.sleep(5) # let everything run
+        except asyncio.exceptions.CancelledError:
+            pass # normal shutdown
 
     async def on_update(self, path: str, *args) -> None:
         x = self.router.resolve_path(path)

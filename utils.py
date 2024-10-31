@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 
+import asyncio
+import sys, traceback, functools
+from typing import Awaitable
+
 def remap(v, in1, in2, out1, out2, clamp=False):
     din = in2 - in1
     dout = out2 - out1
@@ -15,3 +19,7 @@ def clamp(v, min_, max_):
 
 def remove_keys(d, *keys):
     return { k:v for k,v in d.items() if k not in keys }
+
+async def delayed_async(delay: float, f: Awaitable) -> None:
+    await asyncio.sleep(delay)
+    await f

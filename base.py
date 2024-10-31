@@ -299,14 +299,17 @@ class ProximityBased(Behavior):
     async def on_update(self, controller: Controller, address: Any, distance: float) -> None:
         print(f"ProximityBased.on_update {controller.name}#{address} -> {distance=}")
         await controller.actuate(address, distance)
+        # TODO: handle timeout, throttle?
 
 
 @dataclass
 class VelocityState:
-    next_time: float = 0
+    next_at: float = 0 # absolute timestamp
+    timeout_at: float = 0 # absolute timestamp
     last_distance: float = 0
     last_time: float = 0
     samples: list[float] = field(default_factory=list)
+    throttled_task: asyncio.Task = None
     timeout_task: asyncio.Task = None
 
 @dataclass
@@ -330,7 +333,7 @@ class VelocityBased(Behavior):
 
         if dt > self.stall_time:
             state.samples = []
-            log(f"{controller.name}/{actuator.name} samples stall")
+            log(f"{controller.name}/{actuator.name} samples stall") # debug
         else:
             ddist = abs(state.last_distance - distance)
             v = clamp(ddist / dt / actuator.collider_scaler, 0, 1) # normalized 0-1
@@ -339,44 +342,59 @@ class VelocityBased(Behavior):
         state.last_time = now
         state.last_distance = distance
 
+        await self.on_sample(now, state, controller, address, actuator)
+
+    async def on_sample(self, now: float, state: VelocityState, controller: Controller, address: Any, actuator: Actuator):
+        if state.throttled_task != None:
+            return # throttled
+
         await self.handle_samples(now, state, controller, address, actuator)
 
-    # TODO: consider doing a continuous/smooth moving average
+    # TODO: consider doing a continuous moving average (smoother)
     async def handle_samples(self, now: float, state: VelocityState, controller: Controller, address: Any, actuator: Actuator):
+        loop = asyncio.get_event_loop()
+
         if len(state.samples) == 0:
             return # nothing to do
 
-        if now < state.next_time:
-            log(f'{controller.name}/{actuator.name} throttled ({len(state.samples)} samples)') # debug
-            return # throttled
-
         v_avg = sum(state.samples) / len(state.samples)
         await controller.actuate(address, v_avg)
+        state.samples = [] # flush data
+
         # will actuate for a bit until timeout
         if state.timeout_task:
             state.timeout_task.cancel() # reschedule
-        state.timeout_task = asyncio.create_task(self.run_timeout(controller, address, actuator))
+        f = self.on_timeout(state, controller, address, actuator)
+        state.timeout_task = loop.create_task(delayed_async(self.timeout, f))
+        state.timeout_at = now + self.timeout
 
+        throttle_time: float = None
         if (throttle := actuator.throttle):
             if (w := throttle.get('constant')):
-                state.next_time = now + w
-                log(f'{controller.name}/{actuator.name} -> {v_avg*100=:3.2f}% ({len(state.samples)} samples, constant={w:.1f})') # debug
+                throttle_time = w
             elif (w := throttle.get('random')):
                 # inverse proportional to intensity
-                rand_wait = random() * remap_clamp(v_avg, 1, 0, 0, w)
-                log(f'{controller.name}/{actuator.name} -> {v_avg*100=:3.2f}% ({len(state.samples)} samples, rand_wait={rand_wait:.1f})') # debug
-                state.next_time = now + rand_wait
+                throttle_time = random() * remap_clamp(v_avg, 1, 0, 0, w)
 
-                # TODO: schedule task for next_time to actuate based on samples
-                # if timeout runs before next_time then it's fine otherwise timeout need reschedule
+        # don't spam actuator + allows to collect more samples
+        if throttle_time:
+            if state.throttled_task != None:
+                log(f"Warning {controller.name}/{actuator.name} trying to schedule throttle task but one is already set!") # TODO: debug
+            else:
+                f = self.on_throttle_over(state, controller, address, actuator)
+                state.throttled_task = loop.create_task(delayed_async(throttle_time, f))
+                state.next_at = now + throttle_time
 
-        state.samples = [] # flush data
+    async def on_throttle_over(self, state: VelocityState, controller: Controller, address: Any, actuator: Actuator):
+        now = time()
+        state.throttled_task = None
+        state.next_at = None
+        await self.handle_samples(now, state, controller, address, actuator)
 
-    async def run_timeout(self, controller: Controller, address: Any, actuator: Actuator):
-        await asyncio.sleep(self.timeout)
-        log(f'{controller.name}/{actuator.name} run_timeout') # debug
-        await controller.actuate(address, 0)
-        # TODO: should register the stop?
+    async def on_timeout(self, state: VelocityState, controller: Controller, address: Any, actuator: Actuator):
+        await controller.actuate(address, 0) # TODO: should register the stop?
+        state.timeout_task = None
+        state.timeout_at = None
 
 
 @dataclass

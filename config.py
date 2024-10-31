@@ -12,14 +12,12 @@ def build_class(of_type, type: str, **kwargs):
 
     return c(**kwargs)
 
-def reify_config(config: dict):
+def reify_config(game_name: str, config: dict): # WARN: config is mutated
     games = []
-    for n, x in config.get('games', {}).items():
-        game = build_class(base.Game, n, **x)
-        games.append(game)
-
-    if len(games) == 0:
-        raise Exception("No game defined")
+    c_game = config.get('games', {}).get(game_name)
+    if c_game is None:
+        raise Exception(f"Game {game_name} never defined")
+    game = build_class(base.Game, game_name, **c_game)
 
     setup = config['setup']
     router = base.Router(**setup['router'])
@@ -27,21 +25,22 @@ def reify_config(config: dict):
 
     controllers = []
     for c in setup['controllers']:
-        protocol = build_class(base.Protocol, **c['protocol'])
-        connection = build_class(base.Connection, **c['connection'])
+        protocol = build_class(base.Protocol, **c.pop('protocol'))
+        connection = build_class(base.Connection, **c.pop('connection'))
         actuators = {}
-        for address, a in c['actuators'].items():
+        for address, a in c.pop('actuators').items():
             actuators[address] = base.Actuator(**a)
+
         controller = base.Controller(
                 address_to_actuator=actuators,
                 protocol=protocol,
                 connection=connection,
-                **remove_keys(c, 'protocol', 'connection', 'actuators'))
+                **c)
         controllers.append(controller)
 
     return base.Manager(game, router, behavior, controllers)
 
 
-def load_config(path: str):
+def load_config(game_name: str, path: str):
     with open(path, 'rt') as fd:
-        return reify_config(yaml.safe_load(fd))
+        return reify_config(game_name, yaml.safe_load(fd))

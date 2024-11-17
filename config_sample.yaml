@@ -2,7 +2,7 @@ games:
   VRChat:
     hostname: 127.0.0.1
     sending_port: 9000
-    receiving_port: 9001
+    #receiving_port: 9001
 
 cfg_head: &cfg_head
   min_sensitivity: 0.04

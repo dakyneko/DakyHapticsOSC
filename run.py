@@ -16,13 +16,25 @@ async def main():
 
     await manager.start()
 
+    async def echo_callback(path, value):
+        print(f"echo_callback {path=} {value=}")
+    manager.game.listen(path='/avatar/parameters/Triggers',
+                        callback=echo_callback)
+    try:
+        while manager.run:
+            await asyncio.sleep(5) # let everything run
+    except asyncio.exceptions.CancelledError:
+        log("normal shutdown")
+        pass # normal shutdown
+
 
 def handle_exception(loop, context):
-   if (exc := context.get("exception")):
-       print(''.join(traceback.format_exception(type(exc), exc, exc.__traceback__)), file=sys.stderr)
-   else:
-       message = context.get("message", "Unknown error")
-       print(f"Exception with message: {message}", file=sys.stderr)
+    print(f"main handle_exception {loop=} {context=}") # TODO
+    if (exc := context.get("exception")):
+        print(''.join(traceback.format_exception(type(exc), exc, exc.__traceback__)), file=sys.stderr)
+    else:
+        message = context.get("message", "Unknown error")
+        print(f"Exception with message: {message}", file=sys.stderr)
 
 loop = asyncio.new_event_loop()
 loop.set_exception_handler(handle_exception)

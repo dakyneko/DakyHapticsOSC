@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 
 from utils import *
-import socket, logging as log, asyncio, serial_asyncio
+import socket, logging as log, re, asyncio, serial_asyncio, zeroconf
 from struct import unpack, pack
 from time import time
 from collections import defaultdict
 from math import sqrt
-from pythonosc.dispatcher import Dispatcher
+from pythonosc.dispatcher import Dispatcher as OSCDispatcher
 from pythonosc.osc_server import AsyncIOOSCUDPServer
-from pythonosc.udp_client import SimpleUDPClient
+from pythonosc.udp_client import SimpleUDPClient as OSCSimpleUDPClient
+from tinyoscquery.queryservice import OSCQueryService
+from tinyoscquery.utility import get_open_udp_port, get_open_tcp_port
+from tinyoscquery.query import OSCQueryBrowser, OSCQueryClient
 from types import SimpleNamespace as N
 from serial import Serial
 from serial.tools.list_ports import comports as serial_ports
@@ -31,20 +34,36 @@ class Game:
     def listen_distance(self, path): pass
     async def send(self, path, value): pass
 
-# TODO: try OSC query
 @dataclass
 class VRChat(Game):
     hostname: str = '127.0.0.1'
     sending_port: int = 9000
-    receiving_port: int = 9001
+    receiving_port: int = None # if None use OSC Query
+    osc_server_name: str = "DakyHaptics"
 
     async def start(self):
-        self.client = SimpleUDPClient(self.hostname, self.sending_port)
-        self.dispatcher = Dispatcher()
+        self.client = OSCSimpleUDPClient(self.hostname, self.sending_port)
+        self.dispatcher = OSCDispatcher()
         self.event_loop = asyncio.get_event_loop()
+        self.use_osc_query = self.receiving_port == None
+        if self.use_osc_query:
+            self.receiving_port = get_open_udp_port()
+            log(f"VRChat using OSC Query {self.receiving_port=}")
+
         self.server = AsyncIOOSCUDPServer((self.hostname, self.receiving_port),
                                           self.dispatcher, self.event_loop)
         self.transport, _ = await self.server.create_serve_endpoint()
+
+        if self.use_osc_query:
+            log(f"VRChat using OSC Query part 2")
+            self.osc_query_client = await self.wait_vrc_osc()
+            #self.osc_query_client = None # TODO
+            log(f"VRChat using OSC Query part 2 OSCQueryService")
+            osc_query_port = get_open_tcp_port()
+            self.osc_query_service = OSCQueryService(self.osc_server_name, osc_query_port, self.receiving_port)
+            await self.osc_query_service.start()
+            # TODO: if stopping should remove from OSC Query
+            log(f"VRChat OSC Query done {self.receiving_port=} {self.osc_query_client=} {self.osc_query_service=} {osc_query_port=}")
 
     async def disconnect(self) -> None:
         self.transport.close()
@@ -58,6 +77,9 @@ class VRChat(Game):
         def f(path: str, value: Any):
             self.event_loop.create_task(callback(path, value))
         self.dispatcher.map(path, f)
+        if self.use_osc_query:
+            log(f"VRChat OSC Query advertise {path=}") # TODO
+            self.osc_query_service.advertise_endpoint(path)
 
     def listen_distance(self, path: str, callback: Awaitable, wildcard_prefix=False):
         async def f(path: str, proximity: float):
@@ -66,6 +88,31 @@ class VRChat(Game):
 
     async def send(self, path: str, value: float):
         self.client.send_message(path, value)
+
+    # adapted from https://github.com/Hackebein/Object-Tracking-App
+    def find_vrc_osc(self, browser: OSCQueryBrowser) -> zeroconf.ServiceInfo | None:
+        for s in browser.get_discovered_oscquery():
+            client = OSCQueryClient(s)
+            host_info = client.get_host_info()
+            if host_info is None:
+                continue
+            if re.match(r"VRChat-Client-[A-F0-9]{6}", host_info.name):
+                return s
+        return None
+
+    async def wait_vrc_osc(self) -> OSCQueryClient:
+        log(f"VRChat wait_vrc_osc start")
+        browser = OSCQueryBrowser()
+        service_info = None
+        while True:
+            service_info = self.find_vrc_osc(browser)
+            log(f"VRChat wait_vrc_osc {service_info=}")
+            if service_info:
+                break
+            await asyncio.sleep(1) # Wait for discovery
+        client = OSCQueryClient(service_info)
+        log(f"VRChat found {client=}")
+        return client
 
 
 #class ChilloutVR(Game): pass
@@ -447,12 +494,6 @@ class Manager:
                                   callback=self.on_update,
                                   wildcard_prefix=True)
         self.run = True
-
-        try:
-            while self.run:
-                await asyncio.sleep(5) # let everything run
-        except asyncio.exceptions.CancelledError:
-            pass # normal shutdown
 
     async def on_update(self, path: str, *args) -> None:
         x = self.router.resolve_path(path)

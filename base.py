@@ -28,6 +28,7 @@ def log(*args, **kwargs):
 
 class Game:
     async def start(self): pass
+    async def stop(self): pass
     async def disconnect(self) -> None: pass
     async def is_connected(self) -> bool: pass
     def listen(self, path): pass
@@ -41,7 +42,7 @@ class VRChat(Game):
     receiving_port: int = None # if None use OSC Query
     osc_server_name: str = "DakyHaptics"
 
-    async def start(self):
+    async def start(self) -> None:
         self.client = OSCSimpleUDPClient(self.hostname, self.sending_port)
         self.dispatcher = OSCDispatcher()
         self.event_loop = asyncio.get_event_loop()
@@ -64,6 +65,11 @@ class VRChat(Game):
             await self.osc_query_service.start()
             # TODO: if stopping should remove from OSC Query
             log(f"VRChat OSC Query done {self.receiving_port=} {self.osc_query_client=} {self.osc_query_service=} {osc_query_port=}")
+
+    async def stop(self) -> None:
+        if self.use_osc_query:
+            await self.osc_query_service.stop()
+        await self.disconnect()
 
     async def disconnect(self) -> None:
         self.transport.close()
@@ -508,3 +514,4 @@ class Manager:
 
     async def stop(self) -> None:
         self.run = False
+        await self.game.stop()

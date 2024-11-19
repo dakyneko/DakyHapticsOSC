@@ -8,9 +8,7 @@ parser = ArgumentParser()
 parser.add_argument('config', type=str)
 args = parser.parse_args()
 
-async def main():
-    manager = load_config('VRChat', args.config)
-
+async def main(manager):
     router = manager.router
     print("controllers:", list(router.name_to_controller.keys()))
 
@@ -24,8 +22,7 @@ async def main():
         while manager.run:
             await asyncio.sleep(5) # let everything run
     except asyncio.exceptions.CancelledError:
-        log("normal shutdown")
-        pass # normal shutdown
+        print("normal shutdown")
 
 
 def handle_exception(loop, context):
@@ -40,6 +37,10 @@ loop = asyncio.new_event_loop()
 loop.set_exception_handler(handle_exception)
 
 try:
-   loop.run_until_complete(main())
+    manager = load_config('VRChat', args.config)
+    loop.run_until_complete(main(manager))
+except KeyboardInterrupt:
+    print("main KeyboardInterrupt")
+    loop.run_until_complete(manager.stop())
 finally:
-   loop.close()
+    loop.close()

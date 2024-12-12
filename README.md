@@ -8,8 +8,7 @@ Features:
 - Modular supports: ESP32 and Pico through Wifi and USB and multiple protocols (hopefully senseshift/bH, giggle stuff)
 
 This is work in progress.
-The associated firmware to upload on hardware microcontrollers like ESP32 should arrive soon.
-In mean time you can use the prototype from gist here: https://gist.github.com/dakyneko/229e7701e375058a6401de5267c3cd08#file-esp32_haptics_example-cpp (ignore the Python code below, it's the predecessor of this repository)
+The companion firmware implementing The DakyProtocol is there: https://github.com/dakyneko/DakyHapticsFirmware . It's the simplest way to get started with custom hardware ESP32.
 
 # Install & Run
 
@@ -22,7 +21,7 @@ In mean time you can use the prototype from gist here: https://gist.github.com/d
 
 # Config
 
-The sample file `config_sample.yaml` demonstrates VRChat with 3 haptics points connected an ESP32 running Daky firmware connected to Wifi by UDP.
+The sample file `config_sample.yaml` demonstrates VRChat with 3 haptics points controlled by an ESP32 running Daky firmware connected to Wifi by UDP.
 The yaml files has 2 main sections: games and setup. You may notice `cfg_head` which is not a section but just a shorthand snippet used multiple times later (YAML reference block).
 
 ## Game part

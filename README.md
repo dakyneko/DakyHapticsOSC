@@ -40,16 +40,19 @@ the **protocol** section defines how to generate commands to communicate with th
 
 the **connection** section defines where to send orders to reach the controller (like speaking or writting). This can be UDP or USB. For UDP (for ex if you use Wifi), you need to specific the address and the port of the device (eg: ESP32). This also relates to the firmware of the controller you're using. For USB, you'll need to specify the code name and serial.
 
-the **actuators** section:
- - this is a mapping from the address to its configuration. The address is determined by the firmware you're using. For DakyProtocol it's the index number starting from 0, look at the `motor_pins` definitions, this is part of the firmware setup (see the companion DakyHapticsFirmware link above).
- - the name is used to address it from OSC, remember the router prefix is appended.
+the **actuators** section: this is a mapping from the address to its configuration. The address is determined by the firmware you're using. For DakyProtocol it's the index number starting from 0, look at the `motor_pins` definitions, this is part of the firmware setup (see the companion DakyHapticsFirmware link above).
+ - the name is used to address it from OSC, remember the router prefix is appended (example above: `haptX-headCheekR`).
  - the most important `min` and `max` defines the strength value range between 0.0 to 1.0, it's proportional to voltage.
- - For other parameters (included from cfg head) you can keep sane defaults. A few notes: `min_sensitivity` defines the minimum value sent by the behavior below which are considered 0 (useful to prevent **motor stall**); `collider_scaler` is a magic number relating to the size of your **collider** in unity, it impacts the scale of numbers. `throttle` depends on the behavior, it's advanced setup.
+ - `min_sensitivity` defines the minimum value sent by the behavior below which are considered 0 (useful to prevent **motor stall**);
+ - `collider_scaler` is a magic number relating to the size of your **collider** in unity, it impacts the scale of numbers. 
+ - `throttle` depends on the behavior, it's advanced setup (*TODO*: document in future).
+ - Note: in the example `cfg_head` is just a reference, all key-values can be inlined for each motor, it can be a bit repetitive, thus the reference.
 
 
 # Game setup
 
-The setup will receive command from a game, like VRChat (VRC) or ChilloutVR (CVR). *TODO*: write more instructions about OSC setup: especially CVR need a mod.
+This OSC server receives commands from a game like VRChat (VRC) or ChilloutVR (CVR). For this to work, the game need to be setup properly.
+(*TODO*: write more instructions about OSC setup: especially CVR need a mod.)
 
 ## VRChat and Avatar Unity
 
@@ -61,6 +64,8 @@ Two parts: Avatar in unity and OSC json.
   - You don't have to define the parameter in the avatar VRC descriptor nor do so in the animator, it is only used locally.
   - Be sure that each collider shape is big enough to capture where you want to have haptics and ideally they don't overlap for a better effect.
   - Also note your collider size will impact the value computed by the behavior in the haptic setup. If you use VelocityBased behavior, you may need to tweak the `collider_scaler`, which is around 5 for a body part, like the head top. Yes, it's a heuristic magic value, the tested avatar is around 1m tall so if it's twice bigger or smaller, adjust in proportion.
+
+  (*TODO*: screenshot would be helpful)
 
 **OSC** part:
 - you can check the official doc <https://docs.vrchat.com/docs/osc-avatar-parameters>. Don't forget each of your parameter must be present in there to tell VRC to send it by OSC, otherwise it won't work.
